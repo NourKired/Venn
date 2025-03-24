@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
 import random
+from matplotlib import colors as mcolors
+
 
 # ============================
 # Chargement de ton dataset
@@ -54,10 +56,23 @@ marker_symbols_unicode = {
 }
 
 
+def convert_color_to_rgba(color, alpha=0.2):
+    """
+    Convertit une couleur CSS, HEX ou RGB en rgba() avec une transparence alpha donnée.
+    """
+    rgb = mcolors.to_rgb(color)  # Renvoie un tuple (r, g, b)
+    rgba = f'rgba({int(rgb[0]*255)}, {int(rgb[1]*255)}, {int(rgb[2]*255)}, {alpha})'
+    return rgba
+
+models_available=df_ablation_all.Model.unique()
+
+
+
 # ============================
 # Fonctions pour ton ablation
 # ============================
 def get_results(df_ablation_all, model_to_keep, categories):
+
     categories_to_avoid = set(['Classiques', 'Topology', 'Spectral']) - set(categories)
     df_ablation_filtered = df_ablation_all[~df_ablation_all['Categories_Distances'].apply(
         lambda x: any(categorie in x.split(', ') for categorie in categories_to_avoid))]
@@ -74,7 +89,10 @@ def get_results(df_ablation_all, model_to_keep, categories):
             else:
                 category_dist_dict[category_dist] = [i]
 
-    return {i: set(j) for i, j in category_dist_dict.items()}
+    dataset_id_map = {dataset: i for i, dataset in enumerate(df_ablation_filtered.Dataset.unique())}
+
+    df_ablation_filtered['id_dataset'] = df_ablation_filtered['Dataset'].map(dataset_id_map)
+    return {i: set(j) for i, j in category_dist_dict.items()},df_ablation_filtered
 
 # ============================
 # Fonctions géométriques
@@ -136,6 +154,18 @@ app = dash.Dash(__name__)
 app.layout = html.Div([
     html.H1("Diagramme de Venn dynamique avec ablation", style={'textAlign': 'center'}),
 
+    # Sélecteur de modèle à garder
+    html.Div([
+        html.Label("Choisissez le modèle à garder :", style={'fontWeight': 'bold'}),
+        dcc.Dropdown(
+            id='models-to-keep-dropdown',
+            options=[{'label': model, 'value': model} for model in models_available],
+            value=models_available[0],  # Valeur par défaut : le premier modèle
+            clearable=False,
+            style={'width': '50%'}
+        )
+    ], style={'marginBottom': '20px'}),
+
     html.Div([
         html.Label("Choisissez les catégories à afficher :", style={'fontWeight': 'bold'}),
         dcc.Checklist(
@@ -153,6 +183,7 @@ app.layout = html.Div([
     html.Div(id='datasets-deplaces', style={'marginTop': '20px'})
 ])
 
+
 # ============================
 # Callback ➡️ Mise à jour du graph + détecter les déplacements
 # ============================
@@ -160,12 +191,16 @@ app.layout = html.Div([
     [Output('venn-graph', 'figure'),
      Output('store-assignments', 'data'),
      Output('datasets-deplaces', 'children')],
-    [Input('categories-checklist', 'value')],
+    [Input('categories-checklist', 'value'),
+     Input('models-to-keep-dropdown', 'value')],
     [State('store-assignments', 'data')]
 )
-def update_graph(selected_categories, previous_assignments):
+def update_graph(selected_categories, selected_model, previous_assignments):
+    # Met à jour le modèle à garder avec la valeur du dropdown
+    model_to_keep = [selected_model] if selected_model else []
     # 🔸 Résultats après ablation
-    results = get_results(df_ablation_all, model_to_keep, selected_categories)
+    # 🔸 Résultats après ablation
+    results,df_filtered = get_results(df_ablation_all, model_to_keep, selected_categories)
 
     # 🔸 Définir les centres des cercles affichés
     centers = {}
@@ -178,12 +213,85 @@ def update_graph(selected_categories, previous_assignments):
 
     fig = go.Figure()
 
+    # # Pour un layout en grille : 3 colonnes par exemple
+    # cols = 2
+    # x_start = 10  # Position initiale en X
+    # y_start = 7   # Position initiale en Y
+    # x_spacing = 3.8  # Espace entre les colonnes
+    # y_spacing = -2 # Espace entre les lignes
+
+    # df_unique_categories = df_filtered.Categories_Distances.unique()
+
+    # for j, cat in enumerate(df_unique_categories):
+        
+    #     df_filtered_ = df_filtered[
+    #         (df_filtered.Categories_Distances == cat)         ]
+        
+    #     mean_f1 = df_filtered_['F1'].mean()
+    #     mean_f1_str = f"{mean_f1:.2f}"
+
+    #     # Calcul de la position X et Y en fonction de la colonne et ligne
+    #     col = j % cols
+    #     row = j // cols
+    #     x_pos = x_start + col * x_spacing if j!=6 else  x_start + col * x_spacing +2.5
+    #     y_pos = y_start + row * y_spacing
+
+    #     fig.add_annotation(
+    #         x=x_pos,
+    #         y=y_pos,
+    #         text=f"<b>{cat}</b><br>Moyenne F1 : <b>{mean_f1_str}</b>",
+    #         showarrow=False,
+    #         font=dict(size=14, color='black', family="Arial Black"),
+    #         bgcolor='rgba(245, 245, 220, 0.)',  # Beige doux avec + d'opacité
+    #         bordercolor='rgba(245, 245, 220, 0.8)',
+    #         borderwidth=1.5,
+    #         borderpad=5
+    #     )
+
+    # Pour un layout en grille : 3 colonnes par exemple
+    cols = 2
+    x_start = -12  # Position initiale en X
+    y_start = 7   # Position initiale en Y
+    x_spacing = 5.5  # Espace entre les colonnes
+    y_spacing = -2 # Espace entre les lignes
+
+    df_unique_categories = df_filtered.Categories_Distances.unique()
+
+    for j, cat in enumerate(df_unique_categories):
+
+        datasets_cat_best=results[cat]
+
+        df_filtered_ = df_filtered[
+            (df_filtered.id_dataset.isin(datasets_cat_best))  & (df_filtered.Model ==  selected_model)   & (df_filtered.Categories_Distances==cat)    ]
+        mean_f1 = df_filtered_['F1'].mean()
+        mean_f1_str = f"{mean_f1:.2f}"
+
+        # Calcul de la position X et Y en fonction de la colonne et ligne
+        col = j % cols
+        row = j // cols
+        x_pos = x_start + col * x_spacing if j!=6 else  x_start + col * x_spacing +2.5
+        y_pos = y_start + row * y_spacing
+
+        fig.add_annotation(
+            x=x_pos,
+            y=y_pos,
+            text=f"<b>{cat}({len(df_filtered_)})</b><br>Moyenne F1 : <b>{mean_f1_str}</b>",
+            showarrow=False,
+            font=dict(size=14, color='black', family="Arial Black"),
+            bgcolor=convert_color_to_rgba(zone_styles[cat][0], alpha=0.05),  # Beige doux avec + d'opacité
+            bordercolor=convert_color_to_rgba(zone_styles[cat][0], alpha=0.4),
+            borderwidth=1.5,
+            borderpad=5
+        )
+        
+
     # =======================
     # Cercles + Labels
     # =======================
     for i, (label, center) in enumerate(centers.items()):
         pastel_color = pastel_colors[label]
         border_color = pastel_color.replace('0.3', '1')
+
 
         fig.add_shape(
             type="circle",
@@ -200,8 +308,8 @@ def update_graph(selected_categories, previous_assignments):
         )
 
         fig.add_annotation(
-            x=-5,
-            y=5 + i,
+            x=-4 + 5*i,
+            y=10,
             text=f"<b>{label}</b>",
             showarrow=False,
             font=dict(size=16, color='black', family="Arial Black"),
@@ -225,18 +333,18 @@ def update_graph(selected_categories, previous_assignments):
         out_centers = [c for cat, c in centers.items() if cat not in zone_list]
 
         if len(in_centers) == 1:
-            condition = condition_only(in_centers[0], out_centers, radius)
+            condition = condition_only(in_centers[0], out_centers, radius-0.1)
             center_ref = in_centers[0]
         elif len(in_centers) == 2:
-            condition = condition_intersection(in_centers, out_centers, radius)
+            condition = condition_intersection(in_centers, out_centers, radius-0.1)
             center_ref = np.mean(in_centers, axis=0)
         elif len(in_centers) == 3:
-            condition = condition_intersection_3_cercles(*in_centers, radius)
+            condition = condition_intersection_3_cercles(*in_centers, radius-0.1)
             center_ref = np.mean(in_centers, axis=0)
         else:
             continue
 
-        points = generate_points(condition, center_ref, radius, len(dataset_ids))
+        points = generate_points(condition, center_ref, radius-0.1, len(dataset_ids))
 
         color, marker = zone_styles.get(zone_name, ('grey', 'circle'))
 

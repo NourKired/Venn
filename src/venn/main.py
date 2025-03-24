@@ -375,8 +375,11 @@ def update_graph(selected_categories, previous_assignments):
 # ============================
 # RUN SERVER
 # ============================
+import os
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 8050))  # Render provides a PORT env variable
+    app.run(host="0.0.0.0", port=port, debug=True)
 
 fig.write_html("venn_diagram.html", full_html=True, include_plotlyjs='cdn')
 
